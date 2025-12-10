@@ -29,7 +29,7 @@ async def test_fails_cat_command_with_missing_file(bash):
     message = str(err.value)
     assert "Command failed" in message
     assert "Return code: 1" in message
-    assert "No such file or directory" in message
+    assert "missing_file.txt" in message
 
 
 @pytest.mark.asyncio

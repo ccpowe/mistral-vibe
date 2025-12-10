@@ -77,6 +77,7 @@ class OpenAIAdapter(APIAdapter):
         tools: list[AvailableTool] | None,
         max_tokens: int | None,
         tool_choice: StrToolChoice | AvailableTool | None,
+        enable_streaming: bool,
     ) -> dict[str, Any]:
         payload = {
             "model": model_name,
@@ -94,6 +95,10 @@ class OpenAIAdapter(APIAdapter):
             )
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+
+        if enable_streaming:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
 
         return payload
 
@@ -119,7 +124,13 @@ class OpenAIAdapter(APIAdapter):
         converted_messages = [msg.model_dump(exclude_none=True) for msg in messages]
 
         payload = self.build_payload(
-            model_name, converted_messages, temperature, tools, max_tokens, tool_choice
+            model_name,
+            converted_messages,
+            temperature,
+            tools,
+            max_tokens,
+            tool_choice,
+            enable_streaming,
         )
 
         headers = self.build_headers(api_key)
@@ -353,26 +364,41 @@ class GenericBackend:
         self, url: str, data: bytes, headers: dict[str, str]
     ) -> AsyncGenerator[dict[str, Any]]:
         client = self._get_client()
+        event_type = "message"
         async with client.stream(
             method="POST", url=url, content=data, headers=headers
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
-                if line.strip() == "":
+                stripped_line = line.strip()
+                if not stripped_line:
+                    continue
+                if stripped_line.startswith(":"):
+                    # Comment line in SSE streams, safe to ignore.
+                    continue
+                if ":" not in line:
+                    # OpenRouter sometimes emits non key/value lines; skip them.
                     continue
 
-                DELIM_CHAR = ":"
-                assert f"{DELIM_CHAR} " in line, "line should look like `key: value`"
-                delim_index = line.find(DELIM_CHAR)
-                key = line[0:delim_index]
-                value = line[delim_index + 2 :]
+                key, _, value = line.partition(":")
+                data_value = value.lstrip()
+
+                if key == "event":
+                    event_type = data_value or "message"
+                    continue
 
                 if key != "data":
-                    # This might be the case with openrouter, so we just ignore it
+                    # This might be the case with openrouter, so we just ignore it.
                     continue
-                if value == "[DONE]":
+                if data_value == "[DONE]":
                     return
-                yield json.loads(value.strip())
+                if event_type == "error":
+                    try:
+                        error_payload = json.loads(data_value)
+                    except json.JSONDecodeError:
+                        error_payload = data_value
+                    raise RuntimeError(f"SSE error event: {error_payload}")
+                yield json.loads(data_value)
 
     async def count_tokens(
         self,
