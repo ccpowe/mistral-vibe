@@ -1,0 +1,3 @@
+The `git diff` command shows changes that are not yet committed.
+Since the previous changes were already committed, there are no new changes to display with `git diff`.
+If you want to see the changes from the last commit again, you can use `git show HEAD`.

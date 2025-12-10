@@ -187,7 +187,8 @@ class LLMMessage(BaseModel):
     def _from_any(cls, v: Any) -> dict[str, Any] | Any:
         if isinstance(v, dict):
             v.setdefault("content", "")
-            v.setdefault("role", "assistant")
+            if not (role := v.get("role")):
+                v["role"] = "assistant"
             return v
         return {
             "role": str(getattr(v, "role", "assistant")),
