@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from vibe.core.agent import Agent
 from vibe.core.config import VibeConfig
@@ -17,6 +18,8 @@ def run_programmatic(
     output_format: OutputFormat = OutputFormat.TEXT,
     previous_messages: list[LLMMessage] | None = None,
     auto_approve: bool = True,
+    resume_session_path: Path | None = None,
+    resume_session_metadata: dict[str, Any] | None = None,
 ) -> str | None:
     """Run in programmatic mode: execute prompt and return the assistant response.
 
@@ -41,6 +44,8 @@ def run_programmatic(
         max_turns=max_turns,
         max_price=max_price,
         enable_streaming=False,
+        resume_session_path=resume_session_path,
+        resume_session_metadata=resume_session_metadata,
     )
     logger.info("USER: %s", prompt)
 

@@ -25,6 +25,8 @@ class InteractionLogger:
         session_id: str,
         auto_approve: bool = False,
         workdir: Path | None = None,
+        existing_filepath: Path | None = None,
+        existing_metadata: dict[str, Any] | None = None,
     ) -> None:
         if workdir is None:
             workdir = Path.cwd()
@@ -44,12 +46,20 @@ class InteractionLogger:
 
         self.save_dir = Path(session_config.save_dir)
         self.session_prefix = session_config.session_prefix
-        self.session_id = session_id
-        self.session_start_time = datetime.now().isoformat()
+        self.session_id = (
+            existing_metadata.get("session_id", session_id)
+            if existing_metadata
+            else session_id
+        )
+        self.session_start_time = (
+            existing_metadata.get("start_time", datetime.now().isoformat())
+            if existing_metadata
+            else datetime.now().isoformat()
+        )
 
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.filepath = self._get_save_filepath()
-        self.session_metadata = self._initialize_session_metadata()
+        self.filepath = existing_filepath or self._get_save_filepath()
+        self.session_metadata = self._initialize_session_metadata(existing_metadata)
 
     def _get_save_filepath(self) -> Path:
         if self.save_dir is None or self.session_prefix is None:
@@ -97,10 +107,26 @@ class InteractionLogger:
         except Exception:
             return "unknown"
 
-    def _initialize_session_metadata(self) -> SessionMetadata:
+    def _initialize_session_metadata(
+        self, existing_metadata: dict[str, Any] | None = None
+    ) -> SessionMetadata:
         git_commit = self._get_git_commit()
         git_branch = self._get_git_branch()
         user_name = self._get_username()
+
+        base_environment = {"working_directory": str(self.workdir)}
+
+        if existing_metadata:
+            return SessionMetadata(
+                session_id=existing_metadata.get("session_id", self.session_id),
+                start_time=existing_metadata.get("start_time", self.session_start_time),
+                end_time=existing_metadata.get("end_time"),
+                git_commit=existing_metadata.get("git_commit", git_commit),
+                git_branch=existing_metadata.get("git_branch", git_branch),
+                auto_approve=existing_metadata.get("auto_approve", self.auto_approve),
+                username=existing_metadata.get("username", user_name),
+                environment=existing_metadata.get("environment", base_environment),
+            )
 
         return SessionMetadata(
             session_id=self.session_id,
@@ -110,7 +136,7 @@ class InteractionLogger:
             git_branch=git_branch,
             auto_approve=self.auto_approve,
             username=user_name,
-            environment={"working_directory": str(self.workdir)},
+            environment=base_environment,
         )
 
     async def save_interaction(
@@ -232,6 +258,37 @@ class InteractionLogger:
                 )
 
         return None
+
+    @staticmethod
+    def load_metadata(filepath: Path) -> dict[str, Any]:
+        with filepath.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        metadata = data.get("metadata", {})
+        return metadata if isinstance(metadata, dict) else {}
+
+    @staticmethod
+    def list_sessions(
+        config: SessionLoggingConfig, limit: int | None = None
+    ) -> list[tuple[Path, dict[str, Any]]]:
+        save_dir = Path(config.save_dir)
+        if not save_dir.exists():
+            return []
+
+        pattern = f"{config.session_prefix}_*.json"
+        session_files = sorted(
+            save_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+
+        if limit is not None:
+            session_files = session_files[:limit]
+
+        sessions: list[tuple[Path, dict[str, Any]]] = []
+        for path in session_files:
+            try:
+                sessions.append((path, InteractionLogger.load_metadata(path)))
+            except Exception:
+                continue
+        return sessions
 
     @staticmethod
     def load_session(filepath: Path) -> tuple[list[LLMMessage], dict[str, Any]]:

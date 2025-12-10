@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
+from typing import Any
 
 from rich import print as rprint
 
@@ -44,6 +46,19 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Automatically approve all tool executions.",
+    )
+    parser.add_argument(
+        "--list-sessions",
+        action="store_true",
+        help="List saved sessions and exit.",
+    )
+    parser.add_argument(
+        "--sessions-limit",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Maximum number of sessions to show with --list-sessions "
+        "(default: 10 if omitted, use 0 for all).",
     )
     parser.add_argument(
         "--max-turns",
@@ -137,6 +152,9 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     if args.setup:
         run_onboarding()
         sys.exit(0)
+
+    if args.sessions_limit is not None and not args.list_sessions:
+        args.list_sessions = True
     try:
         if not CONFIG_FILE.exists():
             try:
@@ -160,11 +178,50 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
         config = load_config_or_exit(args.agent)
 
+        if args.list_sessions:
+            if not config.session_logging.enabled:
+                rprint(
+                    "[red]Session logging is disabled. "
+                    "Enable it in config to list or resume sessions.[/]"
+                )
+                sys.exit(1)
+
+            if args.sessions_limit is None:
+                limit = 10
+            elif args.sessions_limit == 0:
+                limit = None
+            else:
+                limit = args.sessions_limit
+            sessions = InteractionLogger.list_sessions(config.session_logging, limit)
+            if not sessions:
+                rprint(
+                    f"[yellow]No sessions found in {config.session_logging.save_dir}[/]"
+                )
+                sys.exit(0)
+
+            rprint(f"[green]Sessions in {config.session_logging.save_dir} (newest first):[/]")
+            for path, metadata in sessions:
+                session_id = metadata.get("session_id", path.stem)
+                short_id = session_id.split("-")[0][:8]
+                start_time = metadata.get("start_time", "unknown")
+                end_time = metadata.get("end_time")
+                status = "open" if end_time is None else "closed"
+                total_messages = metadata.get("total_messages") or metadata.get(
+                    "message_count", "n/a"
+                )
+                rprint(
+                    f"- {short_id} | {start_time} | messages: {total_messages} | "
+                    f"status: {status} | file: {path.name}"
+                )
+            sys.exit(0)
+
         if args.enabled_tools:
             config.enabled_tools = args.enabled_tools
 
         loaded_messages = None
+        loaded_metadata: dict[str, Any] | None = None
         session_info = None
+        resume_session_path: Path | None = None
 
         if args.continue_session or args.resume:
             if not config.session_logging.enabled:
@@ -200,6 +257,16 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 loaded_messages, metadata = InteractionLogger.load_session(
                     session_to_load
                 )
+                loaded_metadata = metadata
+                resume_session_path = session_to_load
+                if (
+                    loaded_messages
+                    and config.session_logging.max_loaded_messages > 0
+                    and len(loaded_messages) > config.session_logging.max_loaded_messages
+                ):
+                    loaded_messages = loaded_messages[
+                        -config.session_logging.max_loaded_messages :
+                    ]
                 session_id = metadata.get("session_id", "unknown")[:8]
                 session_time = metadata.get("start_time", "unknown time")
 
@@ -232,6 +299,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     max_price=args.max_price,
                     output_format=output_format,
                     previous_messages=loaded_messages,
+                    resume_session_path=resume_session_path,
+                    resume_session_metadata=loaded_metadata,
                 )
                 if final_response:
                     print(final_response)
@@ -250,6 +319,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 initial_prompt=args.initial_prompt or stdin_prompt,
                 loaded_messages=loaded_messages,
                 session_info=session_info,
+                resume_session_path=resume_session_path,
+                resume_session_metadata=loaded_metadata,
             )
 
     except (KeyboardInterrupt, EOFError):

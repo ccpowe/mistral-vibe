@@ -4,6 +4,7 @@ import asyncio
 from enum import StrEnum, auto
 import os
 import subprocess
+from pathlib import Path
 from typing import Any, ClassVar, assert_never
 
 from textual.app import App, ComposeResult
@@ -82,6 +83,8 @@ class VibeApp(App):
         initial_prompt: str | None = None,
         loaded_messages: list[LLMMessage] | None = None,
         session_info: ResumeSessionInfo | None = None,
+        resume_session_path: Path | None = None,
+        resume_session_metadata: dict[str, Any] | None = None,
         version_update_notifier: VersionUpdateGateway | None = None,
         current_version: str = CORE_VERSION,
         **kwargs: Any,
@@ -122,6 +125,8 @@ class VibeApp(App):
         self._initial_prompt = initial_prompt
         self._loaded_messages = loaded_messages
         self._session_info = session_info
+        self._resume_session_path = resume_session_path
+        self._resume_session_metadata = resume_session_metadata
         self._agent_init_task: asyncio.Task | None = None
         # prevent a race condition where the agent initialization
         # completes exactly at the moment the user interrupts
@@ -413,6 +418,8 @@ class VibeApp(App):
                 self.config,
                 auto_approve=self.auto_approve,
                 enable_streaming=self.enable_streaming,
+                resume_session_path=self._resume_session_path,
+                resume_session_metadata=self._resume_session_metadata,
             )
 
             if not self.auto_approve:
@@ -1083,6 +1090,8 @@ def run_textual_ui(
     initial_prompt: str | None = None,
     loaded_messages: list[LLMMessage] | None = None,
     session_info: ResumeSessionInfo | None = None,
+    resume_session_path: Path | None = None,
+    resume_session_metadata: dict[str, Any] | None = None,
 ) -> None:
     update_notifier = GitHubVersionUpdateGateway(
         owner="mistralai", repository="mistral-vibe", token=os.getenv("GITHUB_TOKEN")
@@ -1094,6 +1103,8 @@ def run_textual_ui(
         initial_prompt=initial_prompt,
         loaded_messages=loaded_messages,
         session_info=session_info,
+        resume_session_path=resume_session_path,
+        resume_session_metadata=resume_session_metadata,
         version_update_notifier=update_notifier,
     )
     app.run()

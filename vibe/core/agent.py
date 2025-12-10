@@ -4,6 +4,7 @@ import asyncio
 from collections import OrderedDict
 from collections.abc import AsyncGenerator, Callable
 from enum import StrEnum, auto
+from pathlib import Path
 import time
 from typing import Any, cast
 from uuid import uuid4
@@ -93,6 +94,8 @@ class Agent:
         max_price: float | None = None,
         backend: BackendLike | None = None,
         enable_streaming: bool = False,
+        resume_session_path: Path | None = None,
+        resume_session_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.config = config
 
@@ -127,13 +130,21 @@ class Agent:
         self.auto_approve = auto_approve
         self.approval_callback: ApprovalCallback | None = None
 
-        self.session_id = str(uuid4())
+        self.session_id = (
+            resume_session_metadata.get("session_id")  # type: ignore[arg-type]
+            if resume_session_metadata
+            else str(uuid4())
+        )
 
         self.interaction_logger = InteractionLogger(
             config.session_logging,
             self.session_id,
             auto_approve,
             config.effective_workdir,
+            existing_filepath=(
+                resume_session_path if config.session_logging.resume_in_place else None
+            ),
+            existing_metadata=resume_session_metadata,
         )
 
         self._last_chunk: LLMChunk | None = None

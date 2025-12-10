@@ -129,6 +129,8 @@ class SessionLoggingConfig(BaseSettings):
     save_dir: str = ""
     session_prefix: str = "session"
     enabled: bool = True
+    max_loaded_messages: int = 50
+    resume_in_place: bool = True
 
     @field_validator("save_dir", mode="before")
     @classmethod
